@@ -1,9 +1,5 @@
 #include "config.h"
 
-// Global IDs
-bool *choosing_ptr;
-int *numbers_ptr;
-int choose_id, number_id;
 // Make logfile and cstest globals
 FILE *logfile = NULL;
 FILE *cstest = NULL;
@@ -52,46 +48,13 @@ void cleanupSlave()
     exit(0);
 }
 
-int maxValue(int *array, int arraySize)
-{
-    int max = 0;
-    for (int k = 0; k < arraySize; k++)
-    {
-        if (array[k] > max)
-        {
-            max = array[k];
-        }
-    }
-    return max;
-}
-
-void print_choosing(int n)
-{
-    printf("Choosing: { ");
-    for (int i = 0; i < n; i++)
-    {
-        printf("%d ", choosing_ptr[i]);
-    }
-    printf("}\n");
-}
-
-void print_numbers(int n)
-{
-    printf("Numbers: { ");
-    for (int i = 0; i < n; i++)
-    {
-        printf("%d ", numbers_ptr[i]);
-    }
-    printf("}\n");
-}
-
 int main(int argc, char *argv[])
 {
     signal(SIGTERM, cleanupSlave);
     int nproc = atoi(argv[2]);   // gets the number of processes
     int proc_id = atoi(argv[1]); // gets the process number
 
-    printf("Inside slave process\n");
+    //printf("Inside slave process\n");
 
     //Get semaphore
     get_sem();
@@ -116,37 +79,41 @@ int main(int argc, char *argv[])
         logfile = fopen(logname, "a");
         if (logfile == NULL)
         {
-            printf("Error opening logfile, exiting...\n");
-            exit(-1);
+            perror("slave: Error opening logfile, exiting...\n");
+            cleanupSlave();
         }
         // Open cstest
         cstest = fopen("cstest", "a");
         if (cstest == NULL)
         {
-            printf("Error opening logfile, exiting...\n");
-            exit(-1);
+            perror("slave: Error opening cstest, exiting...\n");
+            cleanupSlave();
         }
+
         T = time(NULL);
         tm = *localtime(&T);
         fprintf(logfile, "Proc_Id: %d Inside critical section %02d:%02d:%02d\n", proc_id, tm.tm_hour, tm.tm_min, tm.tm_sec);
-        printf("Proc_Id: %d Inside critical section\n", proc_id);
+        //printf("Proc_Id: %d Inside critical section\n", proc_id);
+
         r = (rand() % 5) + 1; // Plus 1 makes sure it never returns 0, range is 1-5
         sleep(r);
+
         // Initialize time variables to output Systemtime in logfile
+        //printf("Getting time for writing to cstest\n");
         T = time(NULL);
         tm = *localtime(&T);
-        fprintf(cstest, "%02d:%02d:%02d Queue %d File modified by process number %d\n", tm.tm_hour, tm.tm_min, tm.tm_sec, numbers_ptr[proc_id - 1], proc_id);
+        //printf("Proc_Id: %d is writing to cstest\n", proc_id);
+        fprintf(cstest, "%02d:%02d:%02d File modified by process number %d\n", tm.tm_hour, tm.tm_min, tm.tm_sec, proc_id);
         fprintf(logfile, "Proc_Id: %d Writing to cstest %02d:%02d:%02d\n", proc_id, tm.tm_hour, tm.tm_min, tm.tm_sec);
-        // Output choosing and numbers for debug
-        // print_choosing(nproc);
-        // print_numbers(nproc);
 
         r = (rand() % 5) + 1;
         sleep(r);
+
         T = time(NULL);
         tm = *localtime(&T);
-        
         fprintf(logfile, "Proc_Id: %d Exiting critical section %02d:%02d:%02d\n", proc_id, tm.tm_hour, tm.tm_min, tm.tm_sec);
+        //printf("Proc_Id: %d Exiting critical section\n", proc_id);
+
         fclose(logfile);
         fclose(cstest);
         logfile = NULL;

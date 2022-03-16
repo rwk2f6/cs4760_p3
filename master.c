@@ -12,11 +12,13 @@ void get_sem()
 {
     //creates the sysv semaphores (or tries to at least)
     key_t key = ftok(".", 'a');
-    //gets chared memory
+    //gets shared memory
     if ((sem_id = semget(key, 1, IPC_CREAT | 666)) == -1)
     {
-        perror("master.c: semget failed:");
+        perror("master: Semget failed, closing...");
         cleanupSemaphore();
+        fprintf(masterlog, "Master couldn't create the semaphore, terminating...\n");
+        fclose(masterlog);
         exit(-1);
     }
     return;
@@ -118,6 +120,8 @@ int main(int argc, char *argv[])
     T = time(NULL);
     tm = *localtime(&T);
 
+    printf("Master process has started\n");
+
     masterlog = fopen("logfile.master", "a");
 
     fprintf(masterlog, "Master process began...\n");
@@ -130,24 +134,31 @@ int main(int argc, char *argv[])
             ss = atoi(optarg); // sets the max number of seconds the master will wait for the children to terminate normally
             break;
         default:
-            printf("Error: invalid argument, exiting...\n\n");
+            perror("master: Error: invalid getopt argument, exiting...\n");
+            cleanupSemaphore();
+            fclose(masterlog);
             exit(-1);
         }
     }
 
+    //Make sure there are the correct amount of commandline arguments
     if (argc != 4)
     {
         printf("Incorrect call of master. Try ./master -t (Time) (Number of Processes)\n");
+        perror("master: Error: Incorrect call of master.\n");
+        fprintf(masterlog, "Master process was called with incorrect arguments, exiting...\n");
+        cleanupSemaphore();
+        fclose(masterlog);
         exit(0);
     }
     else
     {
         n = atoi(argv[3]);
         //printf("N is: %d\n", n);
-        if (n > max_n)
+        if (n > MAX_N)
         {
             printf("N was too large and was set to default value of 20\n");
-            n = max_n;
+            n = MAX_N;
         }
     }
     numofproc = n;
@@ -156,6 +167,7 @@ int main(int argc, char *argv[])
     //Initialize semaphore
     get_sem();
     semctl(sem_id, 0, SETVAL, 1);
+    fprintf(masterlog, "Semaphore created successfully\n");
     
     for (int i = 0; i < n; i++)
     {
@@ -168,7 +180,7 @@ int main(int argc, char *argv[])
 
         if (pid == -1)
         {
-            printf("Fork failed, program exiting early...\n");
+            perror("master: Fork failed, program exiting early...\n");
             error_fork();
         }
 
@@ -196,13 +208,14 @@ int main(int argc, char *argv[])
 
     //Clean shared memory for choosing, then for number
     printf("Finished waiting for children, cleaning up memory and exiting...\n");
+    fprintf(masterlog, "All children finished executing, cleaning up\n");
 
     cleanupSemaphore();
 
     T = time(NULL);
     tm = *localtime(&T);
 
-    fprintf(masterlog, "Shared memory & Semaphore detached and deallocated, closing master process\n");
+    fprintf(masterlog, "Semaphore removed, closing masterlog and master process\n");
 
     fclose(masterlog);
 
