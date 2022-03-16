@@ -8,21 +8,46 @@ int choose_id, number_id;
 FILE *logfile = NULL;
 FILE *cstest = NULL;
 //Semaphore
-sem_t * mutex;
+int sem_id;
 
-void cleanup()
+void get_sem()
+{
+    //creates the sysv semaphores (or tries to at least)
+    key_t key = ftok(".", 'a');
+    //gets chared memory
+    if ((sem_id = semget(key, 1, 0)) == -1)
+    {
+        perror("master.c: semget failed:");
+        cleanupSlave();
+        exit(-1);
+    }
+    return;
+}
+
+void sem_post()
+{
+    struct sembuf op;
+    op.sem_num = 0;
+    op.sem_op = 1;
+    op.sem_flg = 0;
+    semop(sem_id, &op, 1);
+    return;
+}
+
+void sem_wait()
+{
+    struct sembuf op;
+    op.sem_num = 0;
+    op.sem_op = -1;
+    op.sem_flg = 0;
+    semop(sem_id, &op, 1);
+    return;
+}
+
+void cleanupSlave()
 {
     if (cstest != NULL) fclose(cstest);
     if (logfile != NULL) fclose(logfile);
-
-    // Detach shared memory
-    shmdt(choosing_ptr);
-    shmdt(numbers_ptr);
-    // Remove shared memory
-    shmctl(choose_id, IPC_RMID, NULL);
-    shmctl(number_id, IPC_RMID, NULL);
-
-    //Remove semaphore
 
     exit(0);
 }
@@ -62,40 +87,14 @@ void print_numbers(int n)
 
 int main(int argc, char *argv[])
 {
-    signal(SIGTERM, cleanup);
+    signal(SIGTERM, cleanupSlave);
     int nproc = atoi(argv[2]);   // gets the number of processes
     int proc_id = atoi(argv[1]); // gets the process number
-    // Attach shared memory
+
     printf("Inside slave process\n");
-    key_t choosing_key = ftok("Makefile", 'a');
-    choose_id = shmget(choosing_key, sizeof(bool) * nproc, IPC_EXCL);
 
-    key_t numbers_key = ftok(".", 'a');
-    number_id = shmget(numbers_key, sizeof(int) * nproc, IPC_EXCL);
-
-    if (choose_id == -1)
-    {
-        perror("monitor.c: Error: Shared memory (buffer) could not be created");
-        printf("exiting\n\n");
-        // early cleanup
-        exit(0);
-    }
-
-    if (number_id == -1)
-    {
-        perror("monitor.c: Error: Shared memory (buffer) could not be created");
-        printf("exiting\n\n");
-        // early cleanup
-        exit(0);
-    }
-
-    // shm has been gotten
-    choosing_ptr = (bool *)shmat(choose_id, 0, 0);
-    numbers_ptr = (int *)shmat(number_id, 0, 0);
-
-    //Attach semaphore
-    mutex = sem_open("mutexSem", IPC_EXCL, 0644, 1);
-    sem_unlink("mutexSem");
+    //Get semaphore
+    get_sem();
 
     // Initialize srand for random sleep times
     srand(proc_id);
@@ -111,18 +110,7 @@ int main(int argc, char *argv[])
     for (int i = 0; i < 5; i++)
     { // loop with value of 5
       // loop will make it so each child will access the shared logfile 5 times or whatever you set this loop to
-        //choosing_ptr[proc_id - 1] = 1;
-        sem_wait(mutex);
-        numbers_ptr[proc_id - 1] = 1 + maxValue(numbers_ptr, nproc);
-        //choosing_ptr[proc_id - 1] = 0;
-        sem_post(mutex);
-        for (int j = 0; j < nproc; j++)
-        {
-            //while (choosing_ptr[j]);
-            while (sem_wait(mutex));
-
-            while ((numbers_ptr[j] != 0) && (numbers_ptr[j] < numbers_ptr[proc_id - 1] || (numbers_ptr[j] == numbers_ptr[proc_id - 1] && j < proc_id - 1)));
-        }
+        sem_wait();
         // Critical Section, open logfile, write to it, and close
         // Open logfile
         logfile = fopen(logname, "a");
@@ -141,6 +129,7 @@ int main(int argc, char *argv[])
         T = time(NULL);
         tm = *localtime(&T);
         fprintf(logfile, "Proc_Id: %d Inside critical section %02d:%02d:%02d\n", proc_id, tm.tm_hour, tm.tm_min, tm.tm_sec);
+        printf("Proc_Id: %d Inside critical section\n", proc_id);
         r = (rand() % 5) + 1; // Plus 1 makes sure it never returns 0, range is 1-5
         sleep(r);
         // Initialize time variables to output Systemtime in logfile
@@ -156,25 +145,16 @@ int main(int argc, char *argv[])
         sleep(r);
         T = time(NULL);
         tm = *localtime(&T);
+        
         fprintf(logfile, "Proc_Id: %d Exiting critical section %02d:%02d:%02d\n", proc_id, tm.tm_hour, tm.tm_min, tm.tm_sec);
         fclose(logfile);
         fclose(cstest);
         logfile = NULL;
         cstest = NULL;
-        // Indicates that this process is complete
-        numbers_ptr[proc_id - 1] = 0;
+        sem_post();
     }
 
-    // remainder_section ??
-    // Detach shared memory
-    shmdt(choosing_ptr);
-    shmdt(numbers_ptr);
-    // Remove shared memory
-    shmctl(choose_id, IPC_RMID, NULL);
-    shmctl(number_id, IPC_RMID, NULL);
-
-    //Deallocate semaphore
-    sem_post(mutex);
+    // remainder_section
 
     exit(0);
 }

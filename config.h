@@ -13,7 +13,6 @@
 #include <signal.h>
 #include <sys/ipc.h>
 #include <errno.h> 
-#include <semaphore.h>
 
 void cleanup_shm();
 void oot_handler();
@@ -24,4 +23,8 @@ void error_fork();
 int maxValue(int *, int);
 void print_choosing(int);
 void print_numbers(int);
-void cleanup();
+void cleanupSlave();
+void cleanupSemaphore();
+void sem_post();
+void sem_wait();
+void get_sem();

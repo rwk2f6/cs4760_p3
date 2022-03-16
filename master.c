@@ -1,13 +1,26 @@
 #include "config.h"
-
+#define MAX_N 20
+#define MAX_SEC 100
 //globals
-bool * choosing_ptr;
-int * numbers_ptr;
-int choosing_id, numbers_id, numofproc;
+int numofproc;
 int * pid_list = NULL;
 FILE * masterlog = NULL;
 //Semaphore
-sem_t mutex;
+int sem_id;
+
+void get_sem()
+{
+    //creates the sysv semaphores (or tries to at least)
+    key_t key = ftok(".", 'a');
+    //gets chared memory
+    if ((sem_id = semget(key, 1, IPC_CREAT | 666)) == -1)
+    {
+        perror("master.c: semget failed:");
+        cleanupSemaphore();
+        exit(-1);
+    }
+    return;
+}
 
 void cc_handler()
 {
@@ -28,7 +41,7 @@ void error_cc()
 
     while(wait(NULL) > 0);
 
-    cleanup_shm();
+    cleanupSemaphore();
 
     if(masterlog != NULL)
     {
@@ -58,7 +71,7 @@ void error_oot()
 
     while(wait(NULL) > 0);
 
-    cleanup_shm();
+    cleanupSemaphore();
 
     if(masterlog != NULL)
     {
@@ -75,7 +88,7 @@ void error_fork()
     //idealy this should never be used
     fprintf(stderr, "Error forking, terminating...\n");
 
-    cleanup_shm();
+    cleanupSemaphore();
 
     for (int i = 0; i < numofproc; i++)
     {
@@ -85,18 +98,10 @@ void error_fork()
     exit(-1);
 }
 
-void cleanup_shm()
+void cleanupSemaphore()
 {
-    //Detach shared memory
-    shmdt(choosing_ptr);
-    shmdt(numbers_ptr);
-
-    //Remove shared memory
-    shmctl(choosing_id, IPC_RMID, NULL);
-    shmctl(numbers_id, IPC_RMID, NULL);
-
     //Remove semaphore
-    sem_close(&mutex);
+    semctl(sem_id, 0, IPC_RMID, NULL);
 }
 
 int main(int argc, char *argv[])
@@ -148,44 +153,9 @@ int main(int argc, char *argv[])
     numofproc = n;
     pid_list = malloc(sizeof(int) * n);
 
-    bool * choosing = malloc(sizeof(bool) * n);
-    int * number = malloc(sizeof(int) * n);
-    //Initialize both arrays
-    key_t choosing_key = ftok("Makefile", 'a');
-    choosing_id = shmget(choosing_key, sizeof(bool) * n, IPC_CREAT | 0666);
-
-    key_t numbers_key = ftok(".", 'a');
-    numbers_id = shmget(numbers_key, sizeof(int) * n, IPC_CREAT | 0666);
-
-    if (choosing_id == -1){
-        perror("monitor.c: Error: Shared memory (buffer) could not be created");
-        printf("exiting\n\n");
-        //early cleanup
-        exit(0);
-    }
-
-    if (numbers_id == -1){
-        perror("monitor.c: Error: Shared memory (buffer) could not be created");
-        printf("exiting\n\n");
-        //early cleanup
-        exit(0);
-    }
-
-    //shm has been allocated, now we can attach
-    choosing_ptr = (bool *)shmat(choosing_id, 0, 0);
-    numbers_ptr = (int *)shmat(numbers_id, 0, 0);
-
-    for (int i = 0; i < n; i++)
-    {
-        choosing_ptr[i] = false;
-    }
-    for (int i = 0; i < n; i++)
-    {
-        numbers_ptr[i] = 0;
-    }
-
     //Initialize semaphore
-    sem_init(&mutex, 1, 1);
+    get_sem();
+    semctl(sem_id, 0, SETVAL, 1);
     
     for (int i = 0; i < n; i++)
     {
@@ -227,7 +197,7 @@ int main(int argc, char *argv[])
     //Clean shared memory for choosing, then for number
     printf("Finished waiting for children, cleaning up memory and exiting...\n");
 
-    cleanup_shm();
+    cleanupSemaphore();
 
     T = time(NULL);
     tm = *localtime(&T);
